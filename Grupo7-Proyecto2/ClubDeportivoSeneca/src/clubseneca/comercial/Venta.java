@@ -1,0 +1,217 @@
+package clubseneca.comercial;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import clubseneca.usuarios.Empleado;
+import clubseneca.usuarios.Socio;
+import clubseneca.usuarios.Usuario;
+import clubseneca.torneos.BonoDescuento;
+
+public class Venta implements Serializable {
+    private Date fecha;
+    private Usuario comprador;
+    private List<DetalleVenta> detalles;
+    private double porcentajeDescuento;
+    private double puntosRedimidos;
+    private double porcentajePropina;
+    private BonoDescuento bonoAplicado;
+
+    public Venta(Date fecha, Usuario comprador) {
+        this.fecha = fecha;
+        this.comprador = comprador;
+        this.detalles = new ArrayList<>();
+        this.porcentajeDescuento = 0;
+        this.puntosRedimidos = 0;
+        this.porcentajePropina = 0.10;
+        this.bonoAplicado = null;
+    }
+
+    public Date getFecha() {
+        return fecha;
+    }
+
+    public Usuario getComprador() {
+        return comprador;
+    }
+
+    public List<DetalleVenta> getDetalles() {
+        return new ArrayList<>(detalles);
+    }
+
+    public boolean agregarDetalle(Producto producto, int cantidad) {
+        if (producto == null || cantidad <= 0) {
+            return false;
+        }
+
+        DetalleVenta detalle = new DetalleVenta(producto, cantidad);
+        detalles.add(detalle);
+        return true;
+    }
+
+    public boolean aplicarDescuentoEmpleado() {
+        if (bonoAplicado != null) return false;
+        if (comprador != null && comprador.esEmpleado()) {
+            porcentajeDescuento = 0.15;
+            return true;
+        }
+
+        return false;
+    }
+
+    public boolean aplicarCodigoCompartido(String codigo, Empleado empleado) {
+        if (comprador == null || !comprador.esSocio()) {
+            return false;
+        }
+
+        if (empleado == null || codigo == null) {
+            return false;
+        }
+
+        if (bonoAplicado == null && puntosRedimidos == 0 && empleado.getCodigoDescuento().equals(codigo) && porcentajeDescuento == 0) {
+            porcentajeDescuento = 0.08;
+            return true;
+        }
+
+        return false;
+    }
+
+    public boolean configurarPropina(double porcentaje) {
+        if (porcentaje < 0 || porcentaje > 1) {
+            return false;
+        }
+
+        porcentajePropina = porcentaje;
+        return true;
+    }
+
+    public boolean redimirPuntos(double puntos) {
+        if (bonoAplicado != null || porcentajeDescuento > 0) return false;
+        if (puntos > calcularSubtotal() + calcularImpuestos() + calcularPropina()) return false;
+        if (comprador == null || puntos <= 0) {
+            return false;
+        }
+
+        if (comprador.esSocio()) {
+            Socio socio = (Socio) comprador;
+
+            if (puntos <= socio.getPuntosFidelidad()) {
+                puntosRedimidos = puntos;
+                return true;
+            }
+        }
+
+        if (comprador.esEmpleado()) {
+            Empleado empleado = (Empleado) comprador;
+
+            if (puntos <= empleado.getPuntosFidelidad()) {
+                puntosRedimidos = puntos;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public boolean aplicarBono(BonoDescuento bono) {
+        if (bono == null || bono.isUsado() || comprador == null) return false;
+        if (!comprador.esSocio() && !comprador.esInvitadoTorneo()) return false;
+        if (porcentajeDescuento > 0 || puntosRedimidos > 0 || bonoAplicado != null) return false;
+        if (!bono.getSocio().getLogin().equals(comprador.getLogin())) return false;
+        bonoAplicado = bono;
+        return true;
+    }
+    public BonoDescuento getBonoAplicado() { return bonoAplicado; }
+    public double calcularSubtotal() {
+        double total = 0;
+
+        for (DetalleVenta detalle : detalles) {
+            total += detalle.calcularSubtotal();
+        }
+
+        return total;
+    }
+
+    public double calcularSubtotalTienda() {
+        double total = 0;
+
+        for (DetalleVenta detalle : detalles) {
+            if (detalle.getProducto().esArticuloTienda()) {
+                total += detalle.calcularSubtotal();
+            }
+        }
+
+        return total;
+    }
+
+    public double calcularSubtotalCafeteria() {
+        double total = 0;
+
+        for (DetalleVenta detalle : detalles) {
+            if (detalle.getProducto().esProductoCafeteria()) {
+                total += detalle.calcularSubtotal();
+            }
+        }
+
+        return total;
+    }
+
+    public double calcularImpuestos() {
+        double total = 0;
+
+        for (DetalleVenta detalle : detalles) {
+            total += detalle.calcularImpuesto();
+        }
+
+        return total;
+    }
+
+    public double calcularPropina() {
+        double subtotalCafeteria = calcularSubtotalCafeteria();
+        return subtotalCafeteria * porcentajePropina;
+    }
+
+    public double calcularDescuento() {
+        double subtotal = calcularSubtotal();
+        double descuento = subtotal * porcentajeDescuento;
+        if (bonoAplicado != null) {
+            descuento = bonoAplicado.getValor();
+            if (descuento > subtotal) descuento = subtotal;
+        }
+        return descuento;
+    }
+
+    public double calcularTotal() {
+        double subtotal = calcularSubtotal();
+        double impuestos = calcularImpuestos();
+        double propina = calcularPropina();
+        double descuento = calcularDescuento();
+
+        double total = subtotal + impuestos + propina - descuento - puntosRedimidos;
+
+        if (total < 0) {
+            return 0;
+        }
+
+        return total;
+    }
+
+    public double calcularPuntosGenerados() {
+        return calcularTotal() * 0.02;
+    }
+
+    public boolean contieneBebidaCaliente() {
+        for (DetalleVenta detalle : detalles) {
+            if (detalle.getProducto().esBebidaCaliente()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public double getPuntosRedimidos() {
+        return puntosRedimidos;
+    }
+}
